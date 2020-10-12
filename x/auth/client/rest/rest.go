@@ -11,6 +11,7 @@ func RegisterRoutes(cliCtx context.CLIContext, r *mux.Router, storeName string) 
 	r.HandleFunc(
 		"/auth/accounts/{address}", QueryAccountRequestHandlerFn(storeName, cliCtx),
 	).Methods("GET")
+	RegisterTxRoutes(cliCtx, r)
 }
 
 // RegisterTxRoutes registers all transaction routes on the provided router.
