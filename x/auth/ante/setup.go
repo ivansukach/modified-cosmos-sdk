@@ -5,11 +5,11 @@ import (
 
 	sdk "github.com/ivansukach/modified-cosmos-sdk/types"
 	sdkerrors "github.com/ivansukach/modified-cosmos-sdk/types/errors"
-	"github.com/ivansukach/modified-cosmos-sdk/x/auth/types"
+	"github.com/ivansukach/modified-cosmos-sdk/x/auth/legacy/legacytx"
 )
 
 var (
-	_ GasTx = (*types.StdTx)(nil) // assert StdTx implements GasTx
+	_ GasTx = (*legacytx.StdTx)(nil) // assert StdTx implements GasTx
 )
 
 // GasTx defines a Tx with a GetGas() method which is needed to use SetUpContextDecorator

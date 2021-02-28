@@ -1,44 +1,154 @@
 <!--
 order: 6
-synopsis: The `codec` is used everywhere in the Cosmos SDK to encode and decode structs and interfaces. The specific codec used in the Cosmos SDK is called `go-amino`
 -->
 
 # Encoding
 
-## Pre-requisite Readings {hide}
+While encoding in the SDK used to be mainly handled by `go-amino` codec, the SDK is moving towards using `gogoprotobuf` for both state and client-side encoding. {synopsis}
+
+## Pre-requisite Readings
 
 - [Anatomy of an SDK application](../basics/app-anatomy.md) {prereq}
 
 ## Encoding
 
-Every Cosmos SDK application exposes a global `codec` to marshal/unmarshal structs and interfaces in order to store and/or transfer them. As of now, the `codec` used in the Cosmos SDK is [go-amino](https://github.com/tendermint/go-amino), which possesses the following important properties:
+The Cosmos SDK utilizes two binary wire encoding protocols, [Amino](https://github.com/tendermint/go-amino/) which is an object encoding specification and [Protocol Buffers](https://developers.google.com/protocol-buffers), a subset of Proto3 with an extension for
+interface support. See the [Proto3 spec](https://developers.google.com/protocol-buffers/docs/proto3)
+for more information on Proto3, which Amino is largely compatible with (but not with Proto2).
 
-- Interface support. 
-- Deterministic encoding of value (which is required considering that blockchains are deterministic replicated state-machines). 
-- Upgradeable schemas. 
+Due to Amino having significant performance drawbacks, being reflection-based, and
+not having any meaningful cross-language/client support, Protocol Buffers, specifically
+[gogoprotobuf](https://github.com/gogo/protobuf/), is being used in place of Amino.
+Note, this process of using Protocol Buffers over Amino is still an ongoing process.
 
-The application's `codec` is typically initialized in the [application's constructor function](../basics/app-anatomy.md#constructor-function), where it is also passed to each of the application's modules via the [basic manager](../building-modules/module-manager.md#basic-manager). 
+Binary wire encoding of types in the Cosmos SDK can be broken down into two main
+categories, client encoding and store encoding. Client encoding mainly revolves
+around transaction processing and signing, whereas store encoding revolves around
+types used in state-machine transitions and what is ultimately stored in the Merkle
+tree.
 
-Among other things, the `codec` is used by module's [`keeper`s](../building-modules/keeper.md) to marshal objects into `[]byte` before storing them in the module's [`KVStore`](./store.md#kvstore), or to unmarshal them from `[]byte` when retrieving them:
+For store encoding, protobuf definitions can exist for any type and will typically
+have an Amino-based "intermediary" type. Specifically, the protobuf-based type
+definition is used for serialization and persistence, whereas the Amino-based type
+is used for business logic in the state-machine where they may converted back-n-forth.
+Note, the Amino-based types may slowly be phased-out in the future so developers
+should take note to use the protobuf message definitions where possible.
+
+In the `codec` package, there exists two core interfaces, `Marshaler` and `ProtoMarshaler`,
+where the former encapsulates the current Amino interface except it operates on
+types implementing the latter instead of generic `interface{}` types.
+
+In addition, there exists two implementations of `Marshaler`. The first being
+`AminoCodec`, where both binary and JSON serialization is handled via Amino. The
+second being `ProtoCodec`, where both binary and JSON serialization is handled
+via Protobuf.
+
+This means that modules may use Amino or Protobuf encoding but the types must
+implement `ProtoMarshaler`. If modules wish to avoid implementing this interface
+for their types, they may use an Amino codec directly.
+
+### Amino
+
+Every module uses an Amino codec to serialize types and interfaces. This codec typically
+has types and interfaces registered in that module's domain only (e.g. messages),
+but there are exceptions like `x/gov`. Each module exposes a `RegisterLegacyAminoCodec` function
+that allows a user to provide a codec and have all the types registered. An application
+will call this method for each necessary module.
+
+Where there is no protobuf-based type definition for a module (see below), Amino
+is used to encode and decode raw wire bytes to the concrete type or interface:
 
 ```go
-// typical pattern to marshal an object to []byte before storing it
-bz := keeper.cdc.MustMarshalBinaryBare(object)
-
-//typical pattern to unmarshal an object from []byte when retrieving it
-keeper.cdc.MustUnmarshalBinaryBare(bz, &object)
+bz := keeper.cdc.MustMarshalBinaryBare(typeOrInterface)
+keeper.cdc.MustUnmarshalBinaryBare(bz, &typeOrInterface)
 ```
 
-Alternatively, it is possible to use `MustMarshalBinaryLengthPrefixed`/`MustUnmarshalBinaryLengthPrefixed` instead of `MustMarshalBinaryBare`/`MustUnmarshalBinaryBare` for the same encoding prefixed by a `uvarint` encoding of the object to encode. 
+Note, there are length-prefixed variants of the above functionality and this is
+typically used for when the data needs to be streamed or grouped together
+(e.g. `ResponseDeliverTx.Data`)
 
-Another important use of the `codec` is the encoding and decoding of [transactions](./transactions.md). Transactions are defined at the Cosmos SDK level, but passed to the underlying consensus engine in order to be relayed to other peers. Since the underlying consensus engine is agnostic to the application, it only accepts transactions in the form of `[]byte`. The encoding is done by an object called `TxEncoder` and the decoding by an object called `TxDecoder`. 
+### Gogoproto
 
-+++ https://github.com/ivansukach/modified-cosmos-sdk/blob/7d7821b9af132b0f6131640195326aa02b6751db/types/tx_msg.go#L45-L49
+Modules are encouraged to utilize Protobuf encoding for their respective types.
+
+#### FAQ
+
+1. How to create modules using protobuf encoding?
+
+**Defining module types**
+
+Protobuf types can be defined to encode:
+
+- state
+- [`Msg`s](../building-modules/messages-and-queries.md#messages)
+- [Query services](../building-modules/query-services.md)
+- [genesis](../building-modules/genesis.md)
+
+**Naming and conventions**
+
+We encourage developers to follow industry guidelines: [Protocol Buffers style guide](https://developers.google.com/protocol-buffers/docs/style)
+and [Buf](https://buf.build/docs/style-guide), see more details in [ADR 023](../architecture/adr-023-protobuf-naming.md)
+
+2. How to update modules to protobuf encoding?
+
+If modules do not contain any interfaces (e.g. `Account` or `Content`), then they
+may simply migrate any existing types that
+are encoded and persisted via their concrete Amino codec to Protobuf (see 1. for further guidelines) and accept a `Marshaler` as the codec which is implemented via the `ProtoCodec`
+without any further customization.
+
+However, if a module type composes an interface, it must wrap it in the `skd.Any` (from `/types` package) type. To do that, a module-level .proto file must use [`google.protobuf.Any`](https://github.com/protocolbuffers/protobuf/blob/master/src/google/protobuf/any.proto) for respective message type interface types.
+
+For example, in the `x/evidence` module defines an `Evidence` interface, which is used by the `MsgSubmitEvidence`. The structure definition must use `sdk.Any` to wrap the evidence file. In the proto file we define it as follows:
+
+```protobuf
+// proto/cosmos/evidence/v1beta1/tx.proto
+
+message MsgSubmitEvidence {
+  string              submitter = 1;
+  google.protobuf.Any evidence  = 2 [(cosmos_proto.accepts_interface) = "Evidence"];
+}
+```
+
+The SDK `codec.Marshaler` interface provides support methods `MarshalInterface` and `UnmarshalInterface` to easy encoding of state to `Any`.
+
+Module should register interfaces using `InterfaceRegistry` which provides a mechanism for registering interfaces: `RegisterInterface(protoName string, iface interface{})` and implementations: `RegisterImplementations(iface interface{}, impls ...proto.Message)` that can be safely unpacked from Any, similarly to type registration with Amino:
+
++++ https://github.com/ivansukach/modified-cosmos-sdk/blob/v0.40.0-rc4/codec/types/interface_registry.go#L25-L66
+
+In addition, an `UnpackInterfaces` phase should be introduced to deserialization to unpack interfaces before they're needed. Protobuf types that contain a protobuf `Any` either directly or via one of their members should implement the `UnpackInterfacesMessage` interface:
+
+```go
+type UnpackInterfacesMessage interface {
+  UnpackInterfaces(InterfaceUnpacker) error
+}
+```
+
+#### Guidelines for protobuf message definitions
+
+In addition to [following official guidelines](https://developers.google.com/protocol-buffers/docs/proto3#simple), we recommend to use these annotations in .proto files when dealing with interfaces:
+
+- fields which accept interfaces should be annotated with `cosmos_proto.accepts_interface`
+  using the same full-qualified name passed as `protoName` to `InterfaceRegistry.RegisterInterface`
+- interface implementations should be annotated with `cosmos_proto.implements_interface`
+  using the same full-qualified name passed as `protoName` to `InterfaceRegistry.RegisterInterface`
+
+#### Transaction Encoding
+
+Another important use of Protobuf is the encoding and decoding of
+[transactions](./transactions.md). Transactions are defined by the application or
+the SDK, but passed to the underlying consensus engine in order to be relayed to
+other peers. Since the underlying consensus engine is agnostic to the application,
+it only accepts transactions in the form of raw bytes. The encoding is done by an
+object called `TxEncoder` and the decoding by an object called `TxDecoder`.
+
++++ https://github.com/ivansukach/modified-cosmos-sdk/blob/v0.40.0-rc4/types/tx_msg.go#L83-L87
 
 A standard implementation of both these objects can be found in the [`auth` module](https://github.com/ivansukach/modified-cosmos-sdk/blob/master/x/auth):
 
-+++ https://github.com/ivansukach/modified-cosmos-sdk/blob/7d7821b9af132b0f6131640195326aa02b6751db/x/auth/types/stdtx.go#L241-L266
++++ https://github.com/ivansukach/modified-cosmos-sdk/blob/v0.40.0-rc4/x/auth/tx/decoder.go
+
++++ https://github.com/ivansukach/modified-cosmos-sdk/blob/v0.40.0-rc4/x/auth/tx/encoder.go
 
 ## Next {hide}
 
-Learn about [events](./events.md) {hide}
+Learn about [gRPC, REST and other endpoints](./grpc_rest.md) {hide}

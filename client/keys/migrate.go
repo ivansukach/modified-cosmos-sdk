@@ -6,14 +6,13 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/ivansukach/modified-cosmos-sdk/client/flags"
-	"github.com/ivansukach/modified-cosmos-sdk/client/input"
-	"github.com/ivansukach/modified-cosmos-sdk/crypto/keys"
-	sdk "github.com/ivansukach/modified-cosmos-sdk/types"
-
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
+
+	"github.com/ivansukach/modified-cosmos-sdk/client/flags"
+	"github.com/ivansukach/modified-cosmos-sdk/client/input"
+	"github.com/ivansukach/modified-cosmos-sdk/crypto/keyring"
+	sdk "github.com/ivansukach/modified-cosmos-sdk/types"
 )
 
 // migratePassphrase is used as a no-op migration key passphrase as a passphrase
@@ -41,12 +40,16 @@ It is recommended to run in 'dry-run' mode first to verify all key migration mat
 }
 
 func runMigrateCmd(cmd *cobra.Command, args []string) error {
+	rootDir, _ := cmd.Flags().GetString(flags.FlagHome)
+
 	// instantiate legacy keybase
-	rootDir := viper.GetString(flags.FlagHome)
-	legacyKb, err := NewKeyBaseFromDir(rootDir)
+	var legacyKb keyring.LegacyKeybase
+	legacyKb, err := NewLegacyKeyBaseFromDir(rootDir)
 	if err != nil {
 		return err
 	}
+
+	defer legacyKb.Close()
 
 	// fetch list of keys from legacy keybase
 	oldKeys, err := legacyKb.List()
@@ -58,22 +61,24 @@ func runMigrateCmd(cmd *cobra.Command, args []string) error {
 	keyringServiceName := sdk.KeyringServiceName()
 
 	var (
-		tmpDir  string
-		keybase keys.Keybase
+		tmpDir   string
+		migrator keyring.Importer
 	)
 
-	if viper.GetBool(flags.FlagDryRun) {
-		tmpDir, err = ioutil.TempDir("", "keybase-migrate-dryrun")
+	if dryRun, _ := cmd.Flags().GetBool(flags.FlagDryRun); dryRun {
+		tmpDir, err = ioutil.TempDir("", "migrator-migrate-dryrun")
 		if err != nil {
 			return errors.Wrap(err, "failed to create temporary directory for dryrun migration")
 		}
 
 		defer os.RemoveAll(tmpDir)
 
-		keybase, err = keys.NewKeyring(keyringServiceName, "test", tmpDir, buf)
+		migrator, err = keyring.New(keyringServiceName, keyring.BackendTest, tmpDir, buf)
 	} else {
-		keybase, err = keys.NewKeyring(keyringServiceName, viper.GetString(flags.FlagKeyringBackend), rootDir, buf)
+		backend, _ := cmd.Flags().GetString(flags.FlagKeyringBackend)
+		migrator, err = keyring.New(keyringServiceName, backend, rootDir, buf)
 	}
+
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf(
 			"failed to initialize keybase for service %s at directory %s",
@@ -81,25 +86,19 @@ func runMigrateCmd(cmd *cobra.Command, args []string) error {
 		))
 	}
 
-	for _, key := range oldKeys {
-		legKeyInfo, err := legacyKb.Export(key.GetName())
-		if err != nil {
-			return err
-		}
+	if len(oldKeys) == 0 {
+		cmd.Print("Migration Aborted: no keys to migrate")
+		return nil
+	}
 
+	for _, key := range oldKeys {
 		keyName := key.GetName()
 		keyType := key.GetType()
-
-		// skip key if already migrated
-		if _, err := keybase.Get(keyName); err == nil {
-			cmd.PrintErrf("Key '%s (%s)' already exists; skipping ...\n", key.GetName(), keyType)
-			continue
-		}
 
 		cmd.PrintErrf("Migrating key: '%s (%s)' ...\n", key.GetName(), keyType)
 
 		// allow user to skip migrating specific keys
-		ok, err := input.GetConfirmation("Skip key migration?", buf)
+		ok, err := input.GetConfirmation("Skip key migration?", buf, cmd.ErrOrStderr())
 		if err != nil {
 			return err
 		}
@@ -107,8 +106,13 @@ func runMigrateCmd(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		if keyType != keys.TypeLocal {
-			if err := keybase.Import(keyName, legKeyInfo); err != nil {
+		if keyType != keyring.TypeLocal {
+			pubkeyArmor, err := legacyKb.ExportPubKey(keyName)
+			if err != nil {
+				return err
+			}
+
+			if err := migrator.ImportPubKey(keyName, pubkeyArmor); err != nil {
 				return err
 			}
 
@@ -128,10 +132,11 @@ func runMigrateCmd(cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		if err := keybase.ImportPrivKey(keyName, armoredPriv, migratePassphrase); err != nil {
+		if err := migrator.ImportPrivKey(keyName, armoredPriv, migratePassphrase); err != nil {
 			return err
 		}
 	}
+	cmd.Print("Migration Complete")
 
 	return err
 }

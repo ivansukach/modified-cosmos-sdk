@@ -1,36 +1,37 @@
 package keys
 
 import (
+	"context"
+	"fmt"
 	"io/ioutil"
 	"path/filepath"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ivansukach/modified-cosmos-sdk/client"
 	"github.com/ivansukach/modified-cosmos-sdk/client/flags"
-	"github.com/ivansukach/modified-cosmos-sdk/crypto/keys"
-	"github.com/ivansukach/modified-cosmos-sdk/tests"
+	"github.com/ivansukach/modified-cosmos-sdk/crypto/keyring"
+	"github.com/ivansukach/modified-cosmos-sdk/testutil"
 	sdk "github.com/ivansukach/modified-cosmos-sdk/types"
 )
 
 func Test_runImportCmd(t *testing.T) {
-	runningUnattended := isRunningUnattended()
-	importKeyCommand := ImportKeyCommand()
-	mockIn, _, _ := tests.ApplyMockIO(importKeyCommand)
+	cmd := ImportKeyCommand()
+	cmd.Flags().AddFlagSet(Commands("home").PersistentFlags())
+	mockIn := testutil.ApplyMockIODiscardOutErr(cmd)
 
 	// Now add a temporary keybase
-	kbHome, cleanUp := tests.NewTestCaseDir(t)
-	defer cleanUp()
-	viper.Set(flags.FlagHome, kbHome)
+	kbHome := t.TempDir()
+	kb, err := keyring.New(sdk.KeyringServiceName(), keyring.BackendTest, kbHome, mockIn)
 
-	if !runningUnattended {
-		kb, err := keys.NewKeyring(sdk.KeyringServiceName(), viper.GetString(flags.FlagKeyringBackend), viper.GetString(flags.FlagHome), mockIn)
-		require.NoError(t, err)
-		defer func() {
-			kb.Delete("keyname1", "", false)
-		}()
-	}
+	clientCtx := client.Context{}.WithKeyring(kb)
+	ctx := context.WithValue(context.Background(), client.ClientContextKey, &clientCtx)
+
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		kb.Delete("keyname1") // nolint:errcheck
+	})
 
 	keyfile := filepath.Join(kbHome, "key.asc")
 	armoredKey := `-----BEGIN TENDERMINT PRIVATE KEY-----
@@ -42,13 +43,12 @@ HbP+c6JmeJy9JXe2rbbF1QtCX1gLqGcDQPBXiCtFvP7/8wTZtVOPj8vREzhZ9ElO
 =f3l4
 -----END TENDERMINT PRIVATE KEY-----
 `
-	require.NoError(t, ioutil.WriteFile(keyfile, []byte(armoredKey), 0600))
+	require.NoError(t, ioutil.WriteFile(keyfile, []byte(armoredKey), 0644))
 
-	// Now enter password
-	if runningUnattended {
-		mockIn.Reset("123456789\n12345678\n12345678\n")
-	} else {
-		mockIn.Reset("123456789\n")
-	}
-	require.NoError(t, runImportCmd(importKeyCommand, []string{"keyname1", keyfile}))
+	mockIn.Reset("123456789\n")
+	cmd.SetArgs([]string{
+		"keyname1", keyfile,
+		fmt.Sprintf("--%s=%s", flags.FlagKeyringBackend, keyring.BackendTest),
+	})
+	require.NoError(t, cmd.ExecuteContext(ctx))
 }

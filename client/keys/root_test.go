@@ -1,25 +1,15 @@
 package keys
 
 import (
-	"os"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/ivansukach/modified-cosmos-sdk/client/flags"
-	"github.com/ivansukach/modified-cosmos-sdk/crypto/keys"
 )
 
 func TestCommands(t *testing.T) {
-	rootCommands := Commands()
+	rootCommands := Commands("home")
 	assert.NotNil(t, rootCommands)
 
 	// Commands are registered
-	assert.Equal(t, 11, len(rootCommands.Commands()))
-}
-
-func TestMain(m *testing.M) {
-	viper.Set(flags.FlagKeyringBackend, keys.BackendTest)
-	os.Exit(m.Run())
+	assert.Equal(t, 10, len(rootCommands.Commands()))
 }

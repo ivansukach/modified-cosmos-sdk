@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/ivansukach/modified-cosmos-sdk/x/distribution/types"
 	"github.com/ivansukach/modified-cosmos-sdk/x/simulation"
+
+	simtypes "github.com/ivansukach/modified-cosmos-sdk/types/simulation"
+	"github.com/ivansukach/modified-cosmos-sdk/x/distribution/types"
 )
 
 const (
@@ -18,8 +20,8 @@ const (
 
 // ParamChanges defines the parameters that can be modified by param change proposals
 // on the simulation
-func ParamChanges(r *rand.Rand) []simulation.ParamChange {
-	return []simulation.ParamChange{
+func ParamChanges(r *rand.Rand) []simtypes.ParamChange {
+	return []simtypes.ParamChange{
 		simulation.NewSimParamChange(types.ModuleName, keyCommunityTax,
 			func(r *rand.Rand) string {
 				return fmt.Sprintf("\"%s\"", GenCommunityTax(r))

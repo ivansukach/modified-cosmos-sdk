@@ -1,6 +1,8 @@
 package types
 
-import sdk "github.com/ivansukach/modified-cosmos-sdk/types"
+import (
+	sdk "github.com/ivansukach/modified-cosmos-sdk/types"
+)
 
 // querier keys
 const (

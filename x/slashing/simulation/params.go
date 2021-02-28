@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"math/rand"
 
+	simtypes "github.com/ivansukach/modified-cosmos-sdk/types/simulation"
 	"github.com/ivansukach/modified-cosmos-sdk/x/simulation"
-	"github.com/ivansukach/modified-cosmos-sdk/x/slashing/internal/types"
+	"github.com/ivansukach/modified-cosmos-sdk/x/slashing/types"
 )
 
 const (
@@ -18,8 +19,8 @@ const (
 
 // ParamChanges defines the parameters that can be modified by param change proposals
 // on the simulation
-func ParamChanges(r *rand.Rand) []simulation.ParamChange {
-	return []simulation.ParamChange{
+func ParamChanges(r *rand.Rand) []simtypes.ParamChange {
+	return []simtypes.ParamChange{
 		simulation.NewSimParamChange(types.ModuleName, keySignedBlocksWindow,
 			func(r *rand.Rand) string {
 				return fmt.Sprintf("\"%d\"", GenSignedBlocksWindow(r))

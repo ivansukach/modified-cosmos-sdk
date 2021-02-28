@@ -2,14 +2,15 @@ package keys
 
 import (
 	"github.com/ivansukach/modified-cosmos-sdk/codec"
+	cryptocodec "github.com/ivansukach/modified-cosmos-sdk/crypto/codec"
 )
 
 // KeysCdc defines codec to be used with key operations
-var KeysCdc *codec.Codec
+var KeysCdc *codec.LegacyAmino
 
 func init() {
-	KeysCdc = codec.New()
-	codec.RegisterCrypto(KeysCdc)
+	KeysCdc = codec.NewLegacyAmino()
+	cryptocodec.RegisterCrypto(KeysCdc)
 	KeysCdc.Seal()
 }
 

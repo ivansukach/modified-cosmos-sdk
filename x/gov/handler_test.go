@@ -1,21 +1,25 @@
-package gov
+package gov_test
 
 import (
 	"strings"
 	"testing"
 
-	abci "github.com/tendermint/tendermint/abci/types"
+	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 
-	sdk "github.com/ivansukach/modified-cosmos-sdk/types"
+	"github.com/ivansukach/modified-cosmos-sdk/testutil/testdata"
 
 	"github.com/stretchr/testify/require"
+
+	sdk "github.com/ivansukach/modified-cosmos-sdk/types"
+	"github.com/ivansukach/modified-cosmos-sdk/x/gov"
+	"github.com/ivansukach/modified-cosmos-sdk/x/gov/keeper"
 )
 
 func TestInvalidMsg(t *testing.T) {
-	k := Keeper{}
-	h := NewHandler(k)
+	k := keeper.Keeper{}
+	h := gov.NewHandler(k)
 
-	res, err := h(sdk.NewContext(nil, abci.Header{}, false, nil), sdk.NewTestMsg())
+	res, err := h(sdk.NewContext(nil, tmproto.Header{}, false, nil), testdata.NewTestMsg())
 	require.Error(t, err)
 	require.Nil(t, res)
 	require.True(t, strings.Contains(err.Error(), "unrecognized gov message type"))

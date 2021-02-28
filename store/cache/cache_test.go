@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/cosmos/iavl"
+	"github.com/stretchr/testify/require"
+	dbm "github.com/tendermint/tm-db"
+
 	"github.com/ivansukach/modified-cosmos-sdk/store/cache"
 	iavlstore "github.com/ivansukach/modified-cosmos-sdk/store/iavl"
 	"github.com/ivansukach/modified-cosmos-sdk/store/types"
-
-	"github.com/stretchr/testify/require"
-	"github.com/tendermint/iavl"
-	dbm "github.com/tendermint/tm-db"
 )
 
 func TestGetOrSetStoreCache(t *testing.T) {
